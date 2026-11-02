@@ -62,6 +62,12 @@ def test_gemm_skip_head_mid() -> None:
     print()
 
 
+def get_mqa_arch_major() -> int:
+    # SM110 (Thor) runs the SM100 MQA-logits kernels, so it enumerates the SM100 cases.
+    arch_major = get_arch_major()
+    return 10 if arch_major == 11 else arch_major
+
+
 def sample_mqa_cases(name: str, cases: List[tuple]) -> List[tuple]:
     num_cases = os.getenv('DG_MQA_NUM_CASES')
     if num_cases is None:
@@ -143,7 +149,7 @@ def test_mqa_logits():
         return ks, ke
 
     def enumerate_mqa_logits():
-        arch_major = get_arch_major()
+        arch_major = get_mqa_arch_major()
         # Formats: 'fp8' (per-KV float scale), 'mxfp4' / 'mxfp8' (per-32 block scale).
         # SM120 has an MXFP4 kernel but no MXFP8 one: csrc/apis/attention.hpp accepts an MX
         # scaling factor only via `arch_major == 10 or (arch_major == 12 and is_fp4)`.
@@ -241,7 +247,7 @@ def test_mqa_logits():
             assert_bitwise_equal(logits_again, masked_logits, 'mqa logits self-consistency')
 
         workspace = None
-        if get_arch_major() == 10:
+        if get_mqa_arch_major() == 10:
             workspace = deep_gemm.get_mqa_logits_metadata(ks, ke, seq_len_kv, num_heads)
             scheduled_logits = deep_gemm.fp8_fp4_mqa_logits(**kernel_kwargs, schedule_meta=workspace)
             if compressed_logits:
@@ -365,7 +371,7 @@ def test_paged_mqa_logits():
         return x_fp8.view(num_blocks, block_size, num_heads, head_dim + 4), x_cast_back.to(x.dtype)
 
     def enumerate_paged_mqa_logits():
-        arch_major = get_arch_major()
+        arch_major = get_mqa_arch_major()
         max_kv_pool_tokens = 32 * 1024 * 1024
         max_varlen_tokens = 16 * 1024
         # Varlen is SM100/SM120-only: the SM90 paged kernel rejects it, and
